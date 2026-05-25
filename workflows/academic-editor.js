@@ -103,6 +103,10 @@ const T = {
 const {
   task, mode, language = 'zh', outputFormat = 'markdown',
   totalWordTarget = 3000, targetFile, style = 'academic', references,
+  // 模型配置（可覆盖 CLI 默认模型）
+  fastModel = 'haiku',       // 搜索/审查/格式化/规划/大纲/瘦身
+  writeModel,                // 撰写（不指定则用 CLI 默认模型）
+  fixModel,                  // 修复（不指定则用 CLI 默认模型）
 } = args || {}
 
 // ---- 参数校验 ----
@@ -131,7 +135,7 @@ if (targetFile) {
   log(`读取: ${targetFile}`)
   const doc = await agent(
     `读取: ${targetFile}。${T.read}。${K}`,
-    { label: '读取', model: 'haiku' }
+    { label: '读取', model: fastModel }
   )
   if (doc != null && typeof doc === 'string' && doc.length > 0) {
     existingContent = doc
@@ -177,7 +181,7 @@ ${K}`,
           outline: { type: 'array', items: OUTLINE_ITEM },
         }, required: ['mode', 'documentType', 'strategy', 'outline'] }
       : PLAN,
-    model: 'haiku',
+    model: fastModel,
   }
 )
 
@@ -212,7 +216,7 @@ if (!isLite) {
 ${isEditMode ? `现有文档:\n${(existingContent || '').slice(0, Math.min(existingContent.length, 1500))}` : ''}
 字数分配: 引言15-20% 核心章节均分 结论15-20%。
 输出: outline数组，每项 id(S1..)/title/keyPoints(3-5个)/wordBudget。${K} ${T.draft}`,
-    { label: '大纲', schema: { type: 'object', properties: { outline: { type: 'array', items: OUTLINE_ITEM } } }, model: 'haiku' }
+    { label: '大纲', schema: { type: 'object', properties: { outline: { type: 'array', items: OUTLINE_ITEM } } }, model: fastModel }
   )
   outline = or?.outline || []
 }
@@ -232,13 +236,13 @@ if (!isLite && plan.needsResearch) {
     `搜索: ${plan.keyTopics?.join('; ') || task}。
 定向: arxiv.org, semanticscholar.org, aclweb.org, neurips.cc。
 每篇: title/authors/year/venue/contribution/url。5-10篇。${K} ${T.research}`,
-    { label: '搜索', schema: RESEARCH_BRIEF, model: 'haiku' }
+    { label: '搜索', schema: RESEARCH_BRIEF, model: fastModel }
   )
   if (!sr?.sources?.length) {
     log('[WARN] 搜索为空，重试...')
     const retry = await agent(
       `搜索: ${plan.keyTopics?.slice(0,3)?.join(';') || task}。3-5篇核心文献。${K}`,
-      { label: '重试', schema: RESEARCH_BRIEF, model: 'haiku' }
+      { label: '重试', schema: RESEARCH_BRIEF, model: fastModel }
     )
     if (retry?.sources?.length) {
       researchData = { sources: retry.sources, keyFindings: retry.keyFindings || [] }
@@ -274,7 +278,7 @@ ${researchData?.keyFindings ? `资料: ${researchData.keyFindings.slice(0, 5).jo
 - 论点有数据/引用支撑。术语首次附英文。章节间逻辑衔接。
 - 输出: id="${section.id}", title="${section.title}", content=纯正文, wordCount=数字
 ${K} ${T.draft}`,
-    { label: section.id, schema: SECTION_DRAFT }
+    { label: section.id, schema: SECTION_DRAFT, ...(writeModel ? { model: writeModel } : {}) }
   ),
   // 瘦身（传递完整内容，不截断）
   (draft) => {
@@ -284,7 +288,7 @@ ${K} ${T.draft}`,
     return agent(
       `精简至约${budget}字（当前${draft.wordCount}，超${Math.round((draft.wordCount-budget)/budget*100)}%）。
 原文: ${draft.content}。保留关键论点。${K}`,
-      { label: `瘦${draft.id}`, schema: SECTION_DRAFT, model: 'haiku' }
+      { label: `瘦${draft.id}`, schema: SECTION_DRAFT, model: fastModel }
     ).then(r => r || draft)
   },
 )
@@ -317,11 +321,11 @@ if (!isLite) {
   phase('审查')
   const reviews = await parallel([
     () => agent(`审查逻辑: ${reviewDoc}。${PRIORITY}。最多8个。${K} ${T.review}`,
-      { label:'logic', schema:{type:'object',properties:{findings:{type:'array',items:FINDING}}}, model:'haiku' }),
+      { label:'logic', schema:{type:'object',properties:{findings:{type:'array',items:FINDING}}}, model: fastModel }),
     () => agent(`审查语言: ${reviewDoc}。术语/句式/${language==='zh'?'欧化中文':''}。${PRIORITY}。最多8个。${K} ${T.review}`,
-      { label:'lang', schema:{type:'object',properties:{findings:{type:'array',items:FINDING}}}, model:'haiku' }),
+      { label:'lang', schema:{type:'object',properties:{findings:{type:'array',items:FINDING}}}, model: fastModel }),
     () => agent(`审查规范: ${reviewDoc}。引用/层级/伦理。${PRIORITY}。最多8个。${K} ${T.review}`,
-      { label:'format', schema:{type:'object',properties:{findings:{type:'array',items:FINDING}}}, model:'haiku' }),
+      { label:'format', schema:{type:'object',properties:{findings:{type:'array',items:FINDING}}}, model: fastModel }),
   ])
   reviewFindings = reviews.filter(Boolean).flatMap(r => r?.findings || [])
 
@@ -333,9 +337,9 @@ if (!isLite) {
       blocking,
       (f) => parallel([
         () => agent(`验证: "${f.issue}" (${f.location})。真实则 isReal=true。`,
-          { label:`V1`, schema:{type:'object',properties:{isReal:{type:'boolean'},reason:{type:'string'}}}, model:'haiku' }),
+          { label:`V1`, schema:{type:'object',properties:{isReal:{type:'boolean'},reason:{type:'string'}}}, model: fastModel }),
         () => agent(`反驳: "${f.issue}" (${f.location})。默认 isReal=false。`,
-          { label:`V2`, schema:{type:'object',properties:{isReal:{type:'boolean'},reason:{type:'string'}}}, model:'haiku' }),
+          { label:`V2`, schema:{type:'object',properties:{isReal:{type:'boolean'},reason:{type:'string'}}}, model: fastModel }),
       ]).then(vs => { const y = vs.filter(Boolean).filter(v=>v.isReal).length; return {...f, confirmed: y>=2} })
     )
     const confirmed = verified.filter(Boolean).filter(f => f.confirmed)
@@ -357,7 +361,7 @@ if (!isLite) {
 检查: 逻辑一致性、语言表达、引用规范。
 ${PRIORITY}。最多5个最严重问题。
 ${K} ${T.review}`,
-    { label:'审查', schema:{type:'object',properties:{findings:{type:'array',items:FINDING}}}, model:'haiku' }
+    { label:'审查', schema:{type:'object',properties:{findings:{type:'array',items:FINDING}}}, model: fastModel }
   )
   reviewFindings = review?.findings || []
 }
@@ -382,7 +386,7 @@ if (!isLite && reviewFindings.some(f => f.confirmed)) {
 
   const fixed = await agent(
     `修复文档。\n文档:\n${docForFix}\n\n问题:\n${toFix.map(f=>`- [${f.priority}] ${f.location}: ${f.issue}\n  修复: ${f.fix}`).join('\n')}\n\n逐一修复，返回完整文档。${K}`,
-    { label: '修复', model: 'haiku' }
+    { label: '修复', ...(fixModel ? { model: fixModel } : {}) }
   )
   if (fixed && typeof fixed === 'string' && fixed.length > 0) {
     fixedDoc = fixed
@@ -401,7 +405,7 @@ let formatWarn = null
 if (outputFormat === 'docx') {
   finalDoc = await agent(
     `safe-docx 创建文档。学术排版、目录、页码。内容:\n${fixedDoc}`,
-    { label: 'DOCX', model: 'haiku' }
+    { label: 'DOCX', model: fastModel }
   )
   if (!finalDoc || typeof finalDoc !== 'string' || finalDoc.length < 10) {
     formatWarn = 'DOCX 转换失败（safe-docx MCP 可能未安装），回退到 Markdown'
@@ -411,7 +415,7 @@ if (outputFormat === 'docx') {
 } else if (outputFormat === 'latex') {
   finalDoc = await agent(
     `转LaTeX。${language==='zh'?'ctex':'article'}。\n${fixedDoc}`,
-    { label: 'LaTeX', model: 'haiku' }
+    { label: 'LaTeX', model: fastModel }
   )
   if (!finalDoc || typeof finalDoc !== 'string' || finalDoc.length < 10) {
     formatWarn = 'LaTeX 转换失败，回退到 Markdown'
