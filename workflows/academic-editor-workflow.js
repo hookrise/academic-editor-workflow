@@ -12,7 +12,7 @@
 // ============================================================
 
 export const meta = {
-  name: 'academic-editor',
+  name: 'academic-editor-workflow',
   description: '学术写作全流程 v2.4：读取→规划→研究→大纲→撰写→审查→修复→格式化',
   phases: [],
   whenToUse: '写论文、编辑文档、文献综述、研究报告、学术写作',
