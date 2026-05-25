@@ -1,13 +1,8 @@
 // ============================================================
 // Academic Editor v2.3 — 优化 agent 开销
 // ============================================================
-// 优化策略（仅 workflow 内部，不改全局配置）:
-//   - haiku 全铺开: 除撰写外所有 agent 用 haiku（成本 /3）
-//   - lite 合并: plan+outline 合并为一个 agent（省 1 agent）
-//   - lite 单维审查: 1 agent 替代 2 并行（省 1-2 agent）
-//   - lite 跳过对抗验证: 直接报告发现（省 2-6 agent）
-//   - markdown 跳过 format agent: 纯字符串拼接
-//   - 收紧 prompt: 去冗余指令
+// 运行时注入: agent, parallel, pipeline, phase, log, args, budget
+// 这些符号由 Claude Code Workflow 运行时提供，无需定义
 // ============================================================
 
 export const meta = {
@@ -18,6 +13,7 @@ export const meta = {
     { title: '规划+大纲', detail: '策略+大纲（lite 合并）' },
     { title: '研究', detail: '学术搜索（lite 跳过）' },
     { title: '撰写', detail: '分章撰写' },
+    { title: '格式化', detail: 'markdown/docx/latex 输出' },
     { title: '审查', detail: 'P0-P3 审查（lite 单维）' },
     { title: '修复', detail: '自动修复（lite 跳过）' },
   ],
@@ -205,7 +201,7 @@ if (!isLite && plan.needsResearch) {
     log('[WARN] 搜索为空，重试...')
     const retry = await agent(
       `搜索: ${plan.keyTopics?.slice(0,3)?.join(';') || task}。3-5篇核心文献。${K}`,
-      { label: '重试', schema: RESEARCH_BRIEF }
+      { label: '重试', schema: RESEARCH_BRIEF, model: 'haiku' }
     )
     if (retry?.sources?.length) researchData = { sources: retry.sources, keyFindings: retry.keyFindings || [] }
   } else {
@@ -251,6 +247,10 @@ ${K} ${T.draft}`,
 )
 
 const validDrafts = drafts.filter(Boolean)
+if (!validDrafts.length) {
+  log('[ERROR] 所有章节撰写失败')
+  return { error: '撰写阶段失败，无有效章节', outline }
+}
 const totalWords = validDrafts.reduce((s, d) => s + (d.wordCount || 0), 0)
 log(`撰写: ${validDrafts.length}/${outline.length} 节 | ${totalWords} 字`)
 

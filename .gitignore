@@ -7,6 +7,15 @@ desktop.ini
 .vscode/
 .idea/
 
+# Claude Code
+.claude/
+
+# Env & secrets
+.env*
+
+# Logs
+*.log
+
 # Temp
 *.tmp
 *.swp
@@ -15,3 +24,6 @@ desktop.ini
 
 # Node (if any)
 node_modules/
+dist/
+build/
+coverage/
